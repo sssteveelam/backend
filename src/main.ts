@@ -6,10 +6,15 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  const port = process.env.PORT || 3000;
+
+  app.setGlobalPrefix('api');
 
   app.enableCors({
-    origin: ['http://localhost:5173'],
+    origin: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With, Idempotency-Key',
   });
 
   app.useGlobalPipes(
@@ -22,7 +27,8 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  await app.listen(3000);
+  await app.listen(port);
+  console.log(`Backend running on port ${port} at /api`);
 }
 
 bootstrap();
