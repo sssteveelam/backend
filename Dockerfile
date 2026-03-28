@@ -36,12 +36,14 @@ RUN npx prisma generate
 
 # Copy built assets from build stage
 COPY --from=build /app/dist ./dist
+# We need the prisma and seed folders for migrations and seeding in production
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/seed ./seed
 
 # Environmental defaults
 ENV NODE_ENV=production
 EXPOSE 3000
 
 # Start the application
-# We use a shell form to allow for pre-start migrations if needed, 
-# but here we'll handle migrations in the entrypoint or via compose.
-CMD ["npm", "run", "start"]
+# We run migrations and seeding before starting the server
+CMD sh -c "npx prisma migrate deploy && npx prisma db seed && npm run start"
