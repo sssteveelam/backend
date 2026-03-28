@@ -1,0 +1,436 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  staff
+  manager
+  admin
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         UserRole
+  status       String
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  auditEvents     AuditEvent[]
+  idempotencyKeys IdempotencyKey[]
+  receipts        Receipt[] @relation("ReceiptCreatedBy")
+  movements       Movement[] @relation("MovementCreatedBy")
+  approvalRequests ApprovalRequest[] @relation("ApprovalRequestedBy")
+  approvalDecisions ApprovalRequest[] @relation("ApprovalDecidedBy")
+  reservations     Reservation[] @relation("ReservationCreatedBy")
+  issues           Issue[] @relation("IssueCreatedBy")
+  sealedContainers Container[] @relation("ContainerSealedBy")
+  cycleCounts      CycleCount[] @relation("CycleCountCreatedBy")
+
+  @@map("users")
+  @@index([username])
+  @@index([email])
+}
+
+model ApprovalRequest {
+  id                String   @id @default(uuid()) @db.Uuid
+  documentType      String   @map("document_type")
+  documentId        String   @map("document_id") @db.Uuid
+  status            String
+  reason            String?
+  poCode            String?  @map("po_code")
+  thresholdSnapshot Json     @map("threshold_snapshot")
+  requestedBy       String   @map("requested_by") @db.Uuid
+  decidedBy         String?  @map("decided_by") @db.Uuid
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  requester User  @relation("ApprovalRequestedBy", fields: [requestedBy], references: [id], onDelete: Restrict)
+  decider   User? @relation("ApprovalDecidedBy", fields: [decidedBy], references: [id], onDelete: Restrict)
+
+  @@map("approval_requests")
+  @@unique([documentType, documentId])
+  @@index([status, createdAt])
+}
+
+model AuditEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  actorUserId   String   @map("actor_user_id") @db.Uuid
+  action        String
+  entityType    String?  @map("entity_type")
+  entityId      String?  @map("entity_id")
+  beforeJson    Json?    @map("before_json")
+  afterJson     Json?    @map("after_json")
+  reason        String?
+  correlationId String   @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorUserId], references: [id])
+
+  @@map("audit_events")
+  @@index([entityType, entityId, createdAt])
+}
+
+model IdempotencyKey {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorUserId  String   @map("actor_user_id") @db.Uuid
+  route        String
+  key          String
+  requestHash  String   @map("request_hash")
+  responseJson Json?    @map("response_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorUserId], references: [id])
+
+  @@map("idempotency_keys")
+  @@index([route, key, actorUserId])
+}
+
+model Warehouse {
+  id        String      @id @default(uuid()) @db.Uuid
+  code      String      @unique
+  name      String
+  createdAt DateTime    @default(now()) @map("created_at")
+  locations Location[]
+  receipts  Receipt[]
+
+  @@map("warehouses")
+}
+
+model Location {
+  id          String      @id @default(uuid()) @db.Uuid
+  warehouseId String      @map("warehouse_id") @db.Uuid
+  code        String
+  name        String
+  capacityLimitBase Decimal? @map("capacity_limit_base") @db.Decimal(18, 6)
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  containers  Container[]
+  stockLines      StockLine[]
+  fromMovements   Movement[] @relation("MovementFromLocation")
+  toMovements     Movement[] @relation("MovementToLocation")
+  reservations    Reservation[]
+  pickTasks       PickTask[]
+  cycleCounts     CycleCount[]
+
+  @@map("locations")
+  @@unique([warehouseId, code])
+  @@index([warehouseId])
+}
+
+model Supplier {
+  id           String        @id @default(uuid()) @db.Uuid
+  code         String        @unique
+  name         String
+  productUoms  ProductUom[]
+  batches      Batch[]
+  receipts     Receipt[]
+  receiptLines ReceiptLine[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id           String        @id @default(uuid()) @db.Uuid
+  code         String        @unique
+  name         String
+  baseUom      String        @map("base_uom")
+  productUoms  ProductUom[]
+  batches      Batch[]
+  stockLines    StockLine[]
+  receiptLines  ReceiptLine[]
+  movementLines MovementLine[]
+  reservations  Reservation[]
+  issueLines    IssueLine[]
+  pickTasks     PickTask[]
+  cycleCountLines CycleCountLine[]
+
+  @@map("products")
+}
+
+model ProductUom {
+  id           String    @id @default(uuid()) @db.Uuid
+  productId    String    @map("product_id") @db.Uuid
+  supplierId   String?   @map("supplier_id") @db.Uuid
+  uom          String
+  factorToBase Decimal   @map("factor_to_base") @db.Decimal(18, 6)
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  @@map("product_uoms")
+  @@index([productId])
+  @@index([supplierId])
+  @@unique([productId, supplierId, uom])
+}
+
+model Batch {
+  id              String      @id @default(uuid()) @db.Uuid
+  productId       String      @map("product_id") @db.Uuid
+  supplierId      String?     @map("supplier_id") @db.Uuid
+  manufactureDate DateTime    @map("manufacture_date") @db.Date
+  expiryDate      DateTime    @map("expiry_date") @db.Date
+  lotCode         String      @map("lot_code")
+  averageCost     Decimal?    @map("average_cost") @db.Decimal(18, 6)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  product         Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  supplier        Supplier?   @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  stockLines      StockLine[]
+  receiptLines    ReceiptLine[]
+  movementLines   MovementLine[]
+  reservations    Reservation[]
+  pickTasks       PickTask[]
+  cycleCountLines CycleCountLine[]
+
+  @@map("batches")
+  @@unique([productId, supplierId, manufactureDate, expiryDate, lotCode])
+  @@index([productId, expiryDate])
+}
+
+model Container {
+  id         String      @id @default(uuid()) @db.Uuid
+  qrCode     String      @unique @map("qr_code")
+  locationId String      @map("location_id") @db.Uuid
+  status     String?
+  isSealed   Boolean     @default(false) @map("is_sealed")
+  sealedAt   DateTime?   @map("sealed_at")
+  sealedBy   String?     @map("sealed_by") @db.Uuid
+  createdAt  DateTime    @default(now()) @map("created_at")
+  location   Location    @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  sealer     User?       @relation("ContainerSealedBy", fields: [sealedBy], references: [id], onDelete: Restrict)
+  stockLines    StockLine[]
+  movementLines MovementLine[]
+  reservations  Reservation[]
+  pickTasks     PickTask[]
+  cycleCountLines CycleCountLine[]
+
+  @@map("containers")
+  @@index([locationId])
+}
+
+model CycleCount {
+  id         String           @id @default(uuid()) @db.Uuid
+  code       String           @unique
+  locationId String           @map("location_id") @db.Uuid
+  status     String
+  createdBy  String           @map("created_by") @db.Uuid
+  createdAt  DateTime         @default(now()) @map("created_at")
+  location   Location         @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  creator    User             @relation("CycleCountCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines      CycleCountLine[]
+
+  @@map("cycle_counts")
+  @@index([status, createdAt])
+  @@index([locationId])
+}
+
+model CycleCountLine {
+  id              String     @id @default(uuid()) @db.Uuid
+  cycleCountId    String     @map("cycle_count_id") @db.Uuid
+  productId       String     @map("product_id") @db.Uuid
+  batchId         String     @map("batch_id") @db.Uuid
+  containerId     String?    @map("container_id") @db.Uuid
+  countedQuantity Decimal    @map("counted_quantity") @db.Decimal(18, 6)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  cycleCount      CycleCount @relation(fields: [cycleCountId], references: [id], onDelete: Cascade)
+  product         Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch           Batch      @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  container       Container? @relation(fields: [containerId], references: [id], onDelete: Restrict)
+
+  @@map("cycle_count_lines")
+  @@index([cycleCountId])
+  @@index([productId, batchId, containerId])
+}
+
+model StockLine {
+  id           String     @id @default(uuid()) @db.Uuid
+  productId    String     @map("product_id") @db.Uuid
+  batchId      String     @map("batch_id") @db.Uuid
+  locationId   String     @map("location_id") @db.Uuid
+  containerId  String?    @map("container_id") @db.Uuid
+  quantityBase Decimal    @map("quantity_base") @db.Decimal(18, 6)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch        Batch      @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  location     Location   @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  container    Container? @relation(fields: [containerId], references: [id], onDelete: Restrict)
+
+  @@map("stock_lines")
+  @@unique([productId, batchId, locationId, containerId])
+  @@index([productId, locationId])
+  @@index([batchId])
+  @@index([containerId])
+}
+
+model Receipt {
+  id          String        @id @default(uuid()) @db.Uuid
+  code        String        @unique
+  supplierId  String        @map("supplier_id") @db.Uuid
+  warehouseId String        @map("warehouse_id") @db.Uuid
+  status      String
+  totalValue  Decimal       @map("total_value") @db.Decimal(18, 6)
+  createdBy   String        @map("created_by") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at")
+  supplier    Supplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  creator     User          @relation("ReceiptCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines       ReceiptLine[]
+
+  @@map("receipts")
+  @@index([status, createdAt])
+}
+
+model ReceiptLine {
+  id              String    @id @default(uuid()) @db.Uuid
+  receiptId       String    @map("receipt_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  supplierId      String?   @map("supplier_id") @db.Uuid
+  batchId         String?   @map("batch_id") @db.Uuid
+  quantity        Decimal   @db.Decimal(18, 6)
+  quantityBase    Decimal?  @map("quantity_base") @db.Decimal(18, 6)
+  uom             String
+  unitCost        Decimal   @map("unit_cost") @db.Decimal(18, 6)
+  manufactureDate DateTime  @map("manufacture_date") @db.Date
+  expiryDate      DateTime  @map("expiry_date") @db.Date
+  lotCode         String    @map("lot_code")
+  containerQrCode String?   @map("container_qr_code")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  receipt         Receipt   @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  supplier        Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  batch           Batch?    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@map("receipt_lines")
+  @@index([receiptId])
+  @@index([productId])
+  @@index([supplierId])
+}
+
+model Movement {
+  id             String         @id @default(uuid()) @db.Uuid
+  code           String         @unique
+  fromLocationId String         @map("from_location_id") @db.Uuid
+  toLocationId   String         @map("to_location_id") @db.Uuid
+  status         String
+  createdBy      String         @map("created_by") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at")
+  fromLocation   Location       @relation("MovementFromLocation", fields: [fromLocationId], references: [id], onDelete: Restrict)
+  toLocation     Location       @relation("MovementToLocation", fields: [toLocationId], references: [id], onDelete: Restrict)
+  creator        User           @relation("MovementCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines          MovementLine[]
+
+  @@map("movements")
+  @@index([status, createdAt])
+}
+
+model MovementLine {
+  id           String    @id @default(uuid()) @db.Uuid
+  movementId   String    @map("movement_id") @db.Uuid
+  productId    String    @map("product_id") @db.Uuid
+  batchId      String    @map("batch_id") @db.Uuid
+  containerId  String?   @map("container_id") @db.Uuid
+  quantityBase Decimal   @map("quantity_base") @db.Decimal(18, 6)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  movement     Movement  @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch        Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  container    Container? @relation(fields: [containerId], references: [id], onDelete: Restrict)
+
+  @@map("movement_lines")
+  @@index([movementId])
+  @@index([productId])
+  @@index([batchId])
+  @@index([containerId])
+}
+
+model Reservation {
+  id             String    @id @default(uuid()) @db.Uuid
+  productId      String    @map("product_id") @db.Uuid
+  batchId        String    @map("batch_id") @db.Uuid
+  locationId     String    @map("location_id") @db.Uuid
+  containerId    String?   @map("container_id") @db.Uuid
+  quantityBase   Decimal   @map("quantity_base") @db.Decimal(18, 6)
+  status         String
+  expiresAt      DateTime  @map("expires_at")
+  lastActivityAt DateTime  @map("last_activity_at")
+  createdBy      String    @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch          Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  location       Location  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  container      Container? @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  creator        User      @relation("ReservationCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  pickTask       PickTask?
+
+  @@map("reservations")
+  @@index([productId, batchId, locationId, containerId])
+  @@index([status])
+  @@index([status, expiresAt])
+  @@index([status, lastActivityAt])
+}
+
+model AppTimeoutConfig {
+  id                 String   @id @default("default")
+  softReserveMinutes Int      @map("soft_reserve_minutes")
+  hardLockMinutes    Int      @map("hard_lock_minutes")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("app_timeout_config")
+}
+
+model Issue {
+  id        String     @id @default(uuid()) @db.Uuid
+  code      String     @unique
+  status    String
+  createdBy String     @map("created_by") @db.Uuid
+  createdAt DateTime   @default(now()) @map("created_at")
+  creator   User       @relation("IssueCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines     IssueLine[]
+
+  @@map("issues")
+  @@index([status, createdAt])
+}
+
+model IssueLine {
+  id           String    @id @default(uuid()) @db.Uuid
+  issueId      String    @map("issue_id") @db.Uuid
+  productId    String    @map("product_id") @db.Uuid
+  quantityBase Decimal   @map("quantity_base") @db.Decimal(18, 6)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  issue        Issue     @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  pickTasks    PickTask[]
+
+  @@map("issue_lines")
+  @@index([issueId])
+  @@index([productId])
+}
+
+model PickTask {
+  id             String      @id @default(uuid()) @db.Uuid
+  issueLineId    String      @map("issue_line_id") @db.Uuid
+  productId      String      @map("product_id") @db.Uuid
+  batchId        String      @map("batch_id") @db.Uuid
+  locationId     String      @map("location_id") @db.Uuid
+  containerId    String?     @map("container_id") @db.Uuid
+  reservationId  String?     @unique @map("reservation_id") @db.Uuid
+  quantityBase   Decimal     @map("quantity_base") @db.Decimal(18, 6)
+  pickedQuantity Decimal     @default(0) @map("picked_quantity") @db.Decimal(18, 6)
+  status         String
+  createdAt      DateTime    @default(now()) @map("created_at")
+  issueLine      IssueLine   @relation(fields: [issueLineId], references: [id], onDelete: Cascade)
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch          Batch       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  location       Location    @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  container      Container?  @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@map("pick_tasks")
+  @@index([issueLineId])
+  @@index([productId, batchId, locationId, containerId])
+  @@index([status])
+}
