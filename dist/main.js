@@ -7,9 +7,13 @@ const app_module_1 = require("./app.module");
 const http_exception_filter_1 = require("./common/http-exception.filter");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    const port = process.env.PORT || 3000;
+    app.setGlobalPrefix('api');
     app.enableCors({
-        origin: ['http://localhost:5173'],
+        origin: true,
+        methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
         credentials: true,
+        allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With, Idempotency-Key',
     });
     app.useGlobalPipes(new common_1.ValidationPipe({
         whitelist: true,
@@ -17,7 +21,8 @@ async function bootstrap() {
         forbidNonWhitelisted: true,
     }));
     app.useGlobalFilters(new http_exception_filter_1.HttpExceptionFilter());
-    await app.listen(3000);
+    await app.listen(port);
+    console.log(`Backend running on port ${port} at /api`);
 }
 bootstrap();
 //# sourceMappingURL=main.js.map

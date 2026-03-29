@@ -15,6 +15,7 @@ import { ApprovalModule } from './modules/approval/approval.module';
 import { ReservationModule } from './modules/reservation/reservation.module';
 import { IssueModule } from './modules/issue/issue.module';
 import { CycleCountModule } from './modules/cycle-count/cycle-count.module';
+import { AiModule } from './modules/ai/ai.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -33,6 +34,7 @@ import { AppController } from './app.controller';
     ReservationModule,
     IssueModule,
     CycleCountModule,
+    AiModule,
   ],
   controllers: [AppController],
 })

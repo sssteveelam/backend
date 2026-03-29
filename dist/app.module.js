@@ -24,6 +24,7 @@ const approval_module_1 = require("./modules/approval/approval.module");
 const reservation_module_1 = require("./modules/reservation/reservation.module");
 const issue_module_1 = require("./modules/issue/issue.module");
 const cycle_count_module_1 = require("./modules/cycle-count/cycle-count.module");
+const ai_module_1 = require("./modules/ai/ai.module");
 const app_controller_1 = require("./app.controller");
 let AppModule = class AppModule {
     configure(consumer) {
@@ -49,6 +50,7 @@ exports.AppModule = AppModule = __decorate([
             reservation_module_1.ReservationModule,
             issue_module_1.IssueModule,
             cycle_count_module_1.CycleCountModule,
+            ai_module_1.AiModule,
         ],
         controllers: [app_controller_1.AppController],
     })
